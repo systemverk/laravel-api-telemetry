@@ -1,0 +1,64 @@
+{
+    "name": "systemverk/laravel-api-telemetry",
+    "description": "A Laravel package for API request telemetry, providing Redis-backed collection, aggregation and persistence of endpoint usage metrics, response statistics and API activity.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "telemetry",
+        "api",
+        "metrics",
+        "monitoring",
+        "redis",
+        "logging",
+        "analytics"
+    ],
+    "autoload": {
+        "psr-4": {
+            "Systemverk\\LaravelApiTelemetry\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Eirik Halvorsen",
+            "email": "eirik@hdata.no"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^11.0|^12.0",
+        "illuminate/contracts": "^11.0|^12.0",
+        "illuminate/database": "^11.0|^12.0",
+        "illuminate/http": "^11.0|^12.0",
+        "illuminate/redis": "^11.0|^12.0",
+        "illuminate/support": "^11.0|^12.0"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "orchestra/testbench": "^9.0|^10.0",
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^11.5"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Systemverk\\LaravelApiTelemetry\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "analyse": "phpstan analyse --memory-limit=512M",
+        "ci": [
+            "composer validate --strict",
+            "composer analyse",
+            "composer test"
+        ],
+        "test": "phpunit"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Systemverk\\LaravelApiTelemetry\\ApiTelemetryServiceProvider"
+            ]
+        }
+    }
+}
