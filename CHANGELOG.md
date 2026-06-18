@@ -1,3 +1,9 @@
+## [1.0.1](https://github.com/systemverk/laravel-api-telemetry/compare/v1.0.0...v1.0.1) (2026-06-18)
+
+### 🐛 Bug Fixes
+
+* update author email in composer.json ([5e121c2](https://github.com/systemverk/laravel-api-telemetry/commit/5e121c25c9219c3798de8228677dbf9a939e9ed9))
+
 ## 1.0.0 (2026-06-18)
 
 ### ✨ Features
