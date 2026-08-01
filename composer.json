@@ -1,6 +1,6 @@
 {
     "name": "systemverk/laravel-api-telemetry",
-    "description": "A Laravel package for API request telemetry, providing Redis-backed collection, aggregation and persistence of endpoint usage metrics, response statistics and API activity.",
+    "description": "A Laravel package for API request telemetry, providing Redis-backed collection, aggregation and persistence of API request metrics and per-actor usage statistics.",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -13,18 +13,16 @@
         "logging",
         "analytics"
     ],
-    "autoload": {
-        "psr-4": {
-            "Systemverk\\LaravelApiTelemetry\\": "src/"
-        }
-    },
     "authors": [
         {
             "name": "Eirik Halvorsen",
             "email": "eirik386@gmail.com"
         }
     ],
-    "minimum-stability": "stable",
+    "support": {
+        "issues": "https://github.com/systemverk/laravel-api-telemetry/issues",
+        "source": "https://github.com/systemverk/laravel-api-telemetry"
+    },
     "require": {
         "php": "^8.2",
         "illuminate/console": "^11.0|^12.0",
@@ -36,9 +34,19 @@
     },
     "require-dev": {
         "larastan/larastan": "^3.0",
+        "mockery/mockery": "^1.6",
         "orchestra/testbench": "^9.0|^10.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5"
+    },
+    "suggest": {
+        "ext-redis": "Recommended Redis client for production throughput (alternative: predis/predis).",
+        "predis/predis": "Pure PHP Redis client, usable when ext-redis is unavailable."
+    },
+    "autoload": {
+        "psr-4": {
+            "Systemverk\\LaravelApiTelemetry\\": "src/"
+        }
     },
     "autoload-dev": {
         "psr-4": {
@@ -47,12 +55,12 @@
     },
     "scripts": {
         "analyse": "phpstan analyse --memory-limit=512M",
+        "test": "phpunit",
         "ci": [
-            "composer validate --strict",
-            "composer analyse",
-            "composer test"
-        ],
-        "test": "phpunit"
+            "@composer validate --strict",
+            "@analyse",
+            "@test"
+        ]
     },
     "extra": {
         "laravel": {
@@ -60,5 +68,10 @@
                 "Systemverk\\LaravelApiTelemetry\\ApiTelemetryServiceProvider"
             ]
         }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true
     }
 }

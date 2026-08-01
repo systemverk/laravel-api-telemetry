@@ -4,6 +4,7 @@ namespace Systemverk\LaravelApiTelemetry;
 
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Foundation\Http\Kernel as FoundationHttpKernel;
 use Illuminate\Support\ServiceProvider;
 use Systemverk\LaravelApiTelemetry\Console\Commands\ConsolidateApiUsageStats;
 use Systemverk\LaravelApiTelemetry\Console\Commands\ConsolidateMonthlyApiUsageStats;
@@ -18,7 +19,7 @@ class ApiTelemetryServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/../config/api_request_logging.php', 'api_request_logging');
+        $this->mergeConfigFrom(__DIR__.'/../config/api_telemetry.php', 'api_telemetry');
     }
 
     /**
@@ -37,12 +38,8 @@ class ApiTelemetryServiceProvider extends ServiceProvider
             ]);
 
             $this->publishes([
-                __DIR__.'/../config/api_request_logging.php' => config_path('api_request_logging.php'),
+                __DIR__.'/../config/api_telemetry.php' => config_path('api_telemetry.php'),
             ], 'api-telemetry-config');
-
-            $this->publishes([
-                __DIR__.'/../database/migrations' => database_path('migrations'),
-            ], 'api-telemetry-migrations');
         }
 
         $this->registerMiddleware();
@@ -54,33 +51,69 @@ class ApiTelemetryServiceProvider extends ServiceProvider
      */
     private function registerMiddleware(): void
     {
-        if (! config('api_request_logging.auto_register_middleware', true)) {
+        if (! config('api_telemetry.auto_register_middleware', true)) {
             return;
         }
 
-        $this->app->booted(function (): void {
-            $this->app->make(HttpKernel::class)
-                ->appendMiddlewareToGroup('api', LogApiRequest::class);
+        // Deliberately not guarded by runningInConsole(): Octane workers run
+        // under the CLI SAPI and still serve HTTP requests.
+        if (! $this->app->bound(HttpKernel::class)) {
+            return;
+        }
+
+        $group = (string) config('api_telemetry.middleware_group', 'api');
+
+        // bootstrap/app.php applies withMiddleware() through afterResolving on
+        // the kernel, replacing the group list wholesale. Hooking the same event
+        // — rather than app->booted() — guarantees we append after that, not
+        // before, so our entry survives.
+        $this->callAfterResolving(HttpKernel::class, function ($kernel) use ($group): void {
+            // appendMiddlewareToGroup lives on the concrete kernel, not the
+            // contract, so a custom kernel implementation is simply skipped.
+            if (! $kernel instanceof FoundationHttpKernel) {
+                return;
+            }
+
+            // The method throws for an unknown group, and an application that
+            // never called withRouting(api: ...) has no "api" group at all.
+            if (! array_key_exists($group, $kernel->getMiddlewareGroups())) {
+                return;
+            }
+
+            $kernel->appendMiddlewareToGroup($group, LogApiRequest::class);
         });
     }
 
     /**
      * Register the flush, consolidation and prune commands on the scheduler.
+     *
+     * callAfterResolving means the scheduler is only touched if the application
+     * actually builds one, so nothing is resolved during a normal web request.
      */
     private function registerSchedule(): void
     {
-        if (! config('api_request_logging.schedule.enabled', true)) {
+        if (! config('api_telemetry.schedule.enabled', true)) {
             return;
         }
 
-        $this->app->booted(function (): void {
-            $schedule = $this->app->make(Schedule::class);
-            $config = config('api_request_logging.schedule');
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule): void {
+            $flushMinutes = max(1, (int) config('api_telemetry.schedule.flush_minutes', 5));
 
-            $schedule->command('api-logs:flush --max-minutes='.$config['flush_minutes'])->everyMinute();
-            $schedule->command('api-logs:consolidate-daily')->dailyAt($config['daily_at']);
-            $schedule->command('api-logs:consolidate-monthly')->monthlyOn(1, $config['monthly_at']);
-            $schedule->command('api-logs:prune')->dailyAt($config['prune_at']);
+            $schedule->command(FlushApiRequestLogs::class, ["--max-minutes={$flushMinutes}"])
+                ->everyMinute()
+                ->withoutOverlapping();
+
+            $schedule->command(ConsolidateApiUsageStats::class)
+                ->dailyAt((string) config('api_telemetry.schedule.daily_at', '02:00'))
+                ->withoutOverlapping();
+
+            $schedule->command(ConsolidateMonthlyApiUsageStats::class)
+                ->monthlyOn(1, (string) config('api_telemetry.schedule.monthly_at', '03:00'))
+                ->withoutOverlapping();
+
+            $schedule->command(PruneApiRequestLogs::class)
+                ->dailyAt((string) config('api_telemetry.schedule.prune_at', '03:10'))
+                ->withoutOverlapping();
         });
     }
 }

@@ -3,10 +3,13 @@
 namespace Systemverk\LaravelApiTelemetry\Console\Commands;
 
 use Carbon\CarbonImmutable;
-use InvalidArgumentException;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
+use InvalidArgumentException;
 use Systemverk\LaravelApiTelemetry\Models\ApiUsageStat;
+use Systemverk\LaravelApiTelemetry\Support\TelemetryConfig;
+use Systemverk\LaravelApiTelemetry\Support\UsageStatBucket;
 
 class ConsolidateMonthlyApiUsageStats extends Command
 {
@@ -15,7 +18,7 @@ class ConsolidateMonthlyApiUsageStats extends Command
      *
      * @var string
      */
-    protected $signature = 'api-logs:consolidate-monthly
+    protected $signature = 'api-telemetry:consolidate-monthly
         {--month= : UTC month (Y-m), defaults to previous month}';
 
     /**
@@ -30,7 +33,7 @@ class ConsolidateMonthlyApiUsageStats extends Command
      */
     public function handle(): int
     {
-        if (! config('api_request_logging.enabled', true)) {
+        if (! TelemetryConfig::enabled()) {
             return self::SUCCESS;
         }
 
@@ -43,41 +46,30 @@ class ConsolidateMonthlyApiUsageStats extends Command
         }
 
         $monthEnd = $monthStart->endOfMonth();
+        $periodStart = $monthStart->toDateString();
+        $now = Carbon::now('UTC');
 
-        /** @phpstan-var array<string, array{period_type: 'month', period_start: string, user_id: int|null, actor_key: string, total_requests: int, responses_2xx: int, responses_4xx: int, responses_5xx: int, created_at: \Illuminate\Support\Carbon, updated_at: \Illuminate\Support\Carbon}> $bucket */
+        /** @var array<string, array<string, mixed>> $bucket */
         $bucket = [];
 
         ApiUsageStat::query()
             ->where('period_type', 'day')
-            ->whereBetween('period_start', [$monthStart->toDateString(), $monthEnd->toDateString()])
+            ->whereBetween('period_start', [$periodStart, $monthEnd->toDateString()])
             ->orderBy('id')
-            ->chunkById(1000, function (Collection $stats) use (&$bucket, $monthStart): void {
-                foreach ($stats as $stat) {
-                    $bucketKey = 'month|'.$monthStart->toDateString().'|'.$stat->actor_key;
+            ->chunkById(
+                TelemetryConfig::consolidationChunkSize(),
+                function (Collection $stats) use (&$bucket, $periodStart, $now): void {
+                    foreach ($stats as $stat) {
+                        $bucketKey = 'month|'.$periodStart.'|'.$stat->actor_key;
 
-                    if (! isset($bucket[$bucketKey])) {
-                        $bucket[$bucketKey] = [
-                            'period_type' => 'month',
-                            'period_start' => $monthStart->toDateString(),
-                            'user_id' => $stat->user_id,
-                            'actor_key' => $stat->actor_key,
-                            'total_requests' => 0,
-                            'responses_2xx' => 0,
-                            'responses_4xx' => 0,
-                            'responses_5xx' => 0,
-                            'created_at' => now(),
-                            'updated_at' => now(),
-                        ];
+                        $bucket[$bucketKey] ??= UsageStatBucket::make('month', $periodStart, $stat->user_id, $stat->actor_key, $now);
+
+                        UsageStatBucket::addCounters($bucket[$bucketKey], $stat);
                     }
-
-                    $bucket[$bucketKey]['total_requests'] += $stat->total_requests;
-                    $bucket[$bucketKey]['responses_2xx'] += $stat->responses_2xx;
-                    $bucket[$bucketKey]['responses_4xx'] += $stat->responses_4xx;
-                    $bucket[$bucketKey]['responses_5xx'] += $stat->responses_5xx;
                 }
-            });
+            );
 
-        if (empty($bucket)) {
+        if ($bucket === []) {
             $this->info('No daily API usage stats found for monthly consolidation window.');
 
             return self::SUCCESS;
@@ -86,7 +78,7 @@ class ConsolidateMonthlyApiUsageStats extends Command
         ApiUsageStat::query()->upsert(
             array_values($bucket),
             ['period_type', 'period_start', 'actor_key'],
-            ['total_requests', 'responses_2xx', 'responses_4xx', 'responses_5xx', 'updated_at']
+            UsageStatBucket::UPDATE_COLUMNS
         );
 
         $this->info('Consolidated '.count($bucket).' monthly API usage stat rows.');
@@ -98,26 +90,26 @@ class ConsolidateMonthlyApiUsageStats extends Command
     {
         $monthOption = $this->option('month');
 
-        if ($monthOption !== null && (string) $monthOption !== '') {
-            $monthString = (string) $monthOption;
-
-            if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $monthString)) {
-                throw new InvalidArgumentException('Invalid --month format. Expected Y-m, for example 2026-06.');
-            }
-
-            try {
-                $monthStart = CarbonImmutable::createFromFormat('!Y-m', $monthString, 'UTC');
-            } catch (\Throwable) {
-                throw new InvalidArgumentException('Invalid --month value. Expected a real UTC month in Y-m format.');
-            }
-
-            if ($monthStart->format('Y-m') !== $monthString) {
-                throw new InvalidArgumentException('Invalid --month value. Expected a real UTC month in Y-m format.');
-            }
-
-            return $monthStart->startOfMonth();
+        if ($monthOption === null || (string) $monthOption === '') {
+            return CarbonImmutable::now('UTC')->subMonthNoOverflow()->startOfMonth();
         }
 
-        return CarbonImmutable::now('UTC')->subMonthNoOverflow()->startOfMonth();
+        $monthString = (string) $monthOption;
+
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $monthString)) {
+            throw new InvalidArgumentException('Invalid --month format. Expected Y-m, for example 2026-06.');
+        }
+
+        try {
+            $monthStart = CarbonImmutable::createFromFormat('!Y-m', $monthString, 'UTC');
+        } catch (\Throwable) {
+            throw new InvalidArgumentException('Invalid --month value. Expected a real UTC month in Y-m format.');
+        }
+
+        if ($monthStart->format('Y-m') !== $monthString) {
+            throw new InvalidArgumentException('Invalid --month value. Expected a real UTC month in Y-m format.');
+        }
+
+        return $monthStart->startOfMonth();
     }
 }
